@@ -5,21 +5,21 @@
 PLAYER_VARIANT = 4
 
 player_sprite_data:
-IF PLAYER_VARIANT = 1
+        IF PLAYER_VARIANT = 1
         INCBIN "assets/sprites/player/variant_1/sprites.bin"
-ENDIF
-IF PLAYER_VARIANT = 2
+        ENDIF
+        IF PLAYER_VARIANT = 2
         INCBIN "assets/sprites/player/variant_2/sprites.bin"
-ENDIF
-IF PLAYER_VARIANT = 3
+        ENDIF
+        IF PLAYER_VARIANT = 3
         INCBIN "assets/sprites/player/variant_3/sprites.bin"
-ENDIF
-IF PLAYER_VARIANT = 4
+        ENDIF
+        IF PLAYER_VARIANT = 4
         INCBIN "assets/sprites/player/variant_4/sprites.bin"
-ENDIF
-IF PLAYER_VARIANT = 5
+        ENDIF
+        IF PLAYER_VARIANT = 5
         INCBIN "assets/sprites/player/variant_5/sprites.bin"
-ENDIF
+        ENDIF
 
 PLAYER_FRAME_SIZE = 32
 

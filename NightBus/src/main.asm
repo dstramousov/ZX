@@ -158,21 +158,21 @@ sprite_row_address:
 ; ------------------------------------------------------------
 
 shift_sprite_word:
+        ; B must survive: draw/erase use it after this call to decide
+        ; whether the shifted 16-pixel row spills into a third byte.
         ld c,b
-        xor a
-        ld b,c
-        ld c,a
-
-        ld a,b
-        or a
         ld a,c
+        or a
         ret z
+
+        xor a
 
 shift_sprite_word_loop:
         srl d
         rr e
         rra
-        djnz shift_sprite_word_loop
+        dec c
+        jr nz,shift_sprite_word_loop
         ret
 
 

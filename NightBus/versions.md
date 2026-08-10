@@ -133,3 +133,9 @@
 - Upgraded renderer from 8x8 to smooth 16x16 sub-byte movement.
 - Movement bounds are now X=0..240 and Y=0..176.
 - Runtime remains monochrome to avoid ZX Spectrum attribute clash during 1-pixel movement.
+
+## v0.0.17 -> v0.0.19
+
+- Fixed 16x16 sub-byte rendering: `shift_sprite_word` now preserves `B = X & 7`, so shifted rows correctly draw and erase the third screen byte at horizontal phases 1..7.
+- Fixed SjASMPlus 1.23.1 parsing of `src/player_assets.asm`: conditional `IF`/`ENDIF` directives are now indented, so they are parsed as directives instead of labels.
+- Added exact Rex walking-sprite reference material and native-resolution NightBus silhouette studies for the next artwork iteration.
