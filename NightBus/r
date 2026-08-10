@@ -14,6 +14,27 @@ command -v fuse >/dev/null 2>&1 || {
     exit 1
 }
 
+command -v python3 >/dev/null 2>&1 || {
+    echo "ERROR: python3 not found in PATH" >&2
+    exit 1
+}
+
+ROM_DIR="${FUSE_ROM_DIR:-$HOME/.local/share/fuse/roms}"
+ROM0="$ROM_DIR/128-0.rom"
+ROM1="$ROM_DIR/128-1.rom"
+
+for rom in "$ROM0" "$ROM1"; do
+    if [[ ! -f "$rom" ]]; then
+        echo "ERROR: required Sinclair 128K ROM not found: $rom" >&2
+        exit 1
+    fi
+done
+
 make
 
-exec fuse --machine 48 build/nightbus.sna
+exec fuse \
+    --machine 128 \
+    --rom-128-0 "$ROM0" \
+    --rom-128-1 "$ROM1" \
+    --graphics-filter 3x \
+    --snapshot build/nightbus.z80

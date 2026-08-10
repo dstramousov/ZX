@@ -1,3 +1,5 @@
+        DEVICE ZXSPECTRUM128
+
         DEFINE TAPE_FILE "build/nightbus.tap"
 
         EMPTYTAP TAPE_FILE
@@ -12,8 +14,7 @@
         TAPEND
 
         ; BASIC loader body:
-        ; 10 LOAD "" CODE
-        ; 20 RANDOMIZE USR 32768
+        ; 10 LOAD "" CODE: RANDOMIZE USR start
         TAPOUT TAPE_FILE
 
 LOAD        = $EF
@@ -26,12 +27,7 @@ basic:
         dw line10_end-line10
 line10:
         db LOAD,'""',CODE
-        db $0D
-line10_end:
-
-        db 0,20
-        dw line20_end-line20
-line20:
+        db ':'
         db RANDOMIZE,USR
         LUA ALLPASS
             _pc('db "' .. tostring(_c("start")) .. '"')
@@ -41,7 +37,7 @@ line20:
         dw start
         db $00
         db $0D
-line20_end:
+line10_end:
 basic_end:
 
         TAPEND
@@ -50,8 +46,8 @@ basic_end:
         TAPOUT TAPE_FILE,0
         db $03
         db "NIGHTBUS  "
-        dw code_end-start
-        dw start
+        dw code_end-code_start
+        dw code_start
         dw $8000
         TAPEND
 
@@ -60,6 +56,7 @@ basic_end:
 
         ORG $8000
 
+code_start:
         INCLUDE "main.asm"
 code_end:
 
