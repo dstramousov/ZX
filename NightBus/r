@@ -16,4 +16,4 @@ command -v fuse >/dev/null 2>&1 || {
 
 make
 
-exec fuse --machine 128 --auto-load build/nightbus.tap
+exec fuse --machine 48 build/nightbus.sna
