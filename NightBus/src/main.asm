@@ -28,36 +28,34 @@ attr_loop:
         jr attr_loop
 
 attr_done:
-        ; Очищаем bitmap один раз.
         call clear_screen
 
-        ; Начальная позиция игрового маркера.
-        ld a,128
+        ; Начальная позиция спрайта.
+        ; X ограничиваем 0..248, Y 0..184,
+        ; чтобы 8x8 объект всегда помещался на экране.
+        ld a,124
         ld (player_x),a
 
-        ld a,96
+        ld a,92
         ld (player_y),a
+
+        ; Смотрим вправо, стоим.
+        xor a
+        ld (player_facing),a
+        ld (player_frame),a
+        ld (anim_timer),a
+        ld (horizontal_moving),a
 
         call init_interrupts
         call draw_player
 
-
-; ------------------------------------------------------------
-; main_loop
-;
-; Один цикл = один кадр Spectrum (~50 Гц).
-;
-;   HALT
-;   erase
-;   input
-;   draw
-; ------------------------------------------------------------
 
 main_loop:
         halt
 
         call erase_player
         call read_keyboard
+        call update_animation
         call draw_player
 
         jr main_loop
@@ -65,8 +63,6 @@ main_loop:
 
 ; ------------------------------------------------------------
 ; clear_screen
-;
-; Очищает bitmap $4000-$57FF.
 ; ------------------------------------------------------------
 
 clear_screen:
@@ -93,17 +89,13 @@ clear_screen_done:
 ; ------------------------------------------------------------
 ; screen_address
 ;
-; Вход:
-;   A  = Y, 0..191
-;
-; Выход:
-;   HL = адрес начала pixel row.
+; A = Y, 0..191
+; HL = адрес начала pixel row.
 ; ------------------------------------------------------------
 
 screen_address:
         ld b,a
 
-        ; H = 010 Y7 Y6 Y2 Y1 Y0
         and %00000111
         or $40
         ld h,a
@@ -116,7 +108,6 @@ screen_address:
         or h
         ld h,a
 
-        ; L = Y5 Y4 Y3 00000
         ld a,b
         and %00111000
         rlca
@@ -127,109 +118,171 @@ screen_address:
 
 
 ; ------------------------------------------------------------
-; pixel_mask
+; sprite_row_address
 ;
 ; Вход:
-;   A = X, 0..255
+;   A = Y строки спрайта
 ;
 ; Выход:
-;   C = номер байта в строке (X / 8)
-;   A = маска нужного пикселя
-;
-; ZX хранит левый пиксель в bit 7:
-;
-; X mod 8:
-;   0 -> %10000000
-;   1 -> %01000000
-;   ...
-;   7 -> %00000001
+;   HL = экранный адрес строки
+;   C  = byte offset по X (player_x / 8)
+;   B  = bit shift (player_x & 7)
 ; ------------------------------------------------------------
 
-pixel_mask:
+sprite_row_address:
+        call screen_address
+
+        ld a,(player_x)
         ld c,a
-
-        ; C = X / 8
-        srl c
-        srl c
-        srl c
-
-        ; B = X & 7
         and %00000111
         ld b,a
 
-        ld a,%10000000
-        jr z,pixel_mask_done
-
-pixel_mask_shift:
+        ld a,c
         srl a
-        djnz pixel_mask_shift
+        srl a
+        srl a
+        ld c,a
 
-pixel_mask_done:
+        ld a,l
+        add a,c
+        ld l,a
+        ret
+
+
+; ------------------------------------------------------------
+; shift_sprite_byte
+;
+; Вход:
+;   A = строка спрайта
+;   B = сдвиг 0..7
+;
+; Выход:
+;   D = левый байт
+;   E = правый байт
+;
+; При X, не кратном 8, один 8-битный ряд спрайта
+; занимает два соседних байта видеопамяти.
+; ------------------------------------------------------------
+
+shift_sprite_byte:
+        ld d,a
+        ld e,0
+
+        ld a,b
+        or a
+        ret z
+
+        ld c,b
+
+shift_sprite_loop:
+        srl d
+        rr e
+        dec c
+        jr nz,shift_sprite_loop
         ret
 
 
 ; ------------------------------------------------------------
 ; draw_player
 ;
-; Рисует один белый пиксель в (player_x, player_y).
+; Рисует 8 строк спрайта.
+; Каждая строка XOR'ится в экран.
 ; ------------------------------------------------------------
 
 draw_player:
+        call select_player_sprite
         ld a,(player_y)
-        call screen_address
+        ld (work_y),a
+        ld c,8
 
-        ld a,(player_x)
-        call pixel_mask
+draw_player_row:
+        ld a,(work_y)
+        push bc
+        call sprite_row_address
 
-        ; HL += X / 8
-        ld b,0
-        add hl,bc
+        ld a,(ix+0)
+        call shift_sprite_byte
 
-        or (hl)
+        ; Левый кусок.
+        ld a,(hl)
+        or d
         ld (hl),a
+
+        ; Правый кусок нужен только при сдвиге.
+        ld a,b
+        or a
+        jr z,draw_player_next
+
+        inc hl
+        ld a,(hl)
+        or e
+        ld (hl),a
+
+draw_player_next:
+        inc ix
+        ld a,(work_y)
+        inc a
+        ld (work_y),a
+        pop bc
+        dec c
+        jr nz,draw_player_row
         ret
 
 
 ; ------------------------------------------------------------
 ; erase_player
 ;
-; Так как фон пока пустой, старый пиксель можно просто стереть.
+; Фон пока пустой, поэтому стираем те же биты через AND mask.
 ; ------------------------------------------------------------
 
 erase_player:
+        call select_player_sprite
         ld a,(player_y)
-        call screen_address
+        ld (work_y),a
+        ld c,8
 
-        ld a,(player_x)
-        call pixel_mask
+erase_player_row:
+        ld a,(work_y)
+        push bc
+        call sprite_row_address
 
-        ld b,0
-        add hl,bc
+        ld a,(ix+0)
+        call shift_sprite_byte
 
+        ld a,d
         cpl
         and (hl)
         ld (hl),a
+
+        ld a,b
+        or a
+        jr z,erase_player_next
+
+        inc hl
+        ld a,e
+        cpl
+        and (hl)
+        ld (hl),a
+
+erase_player_next:
+        inc ix
+        ld a,(work_y)
+        inc a
+        ld (work_y),a
+        pop bc
+        dec c
+        jr nz,erase_player_row
         ret
 
 
 ; ------------------------------------------------------------
 ; read_keyboard
-;
-; Читаем стандартные cursor keys Spectrum:
-;
-;   LEFT  = 5
-;   DOWN  = 6
-;   UP    = 7
-;   RIGHT = 8
-;
-; На настоящем Spectrum курсоры — CAPS SHIFT + 5/6/7/8.
-; Нам состояние CAPS SHIFT не важно: достаточно увидеть сами 5..8.
-;
-; В Fuse обычные стрелки обычно эмулируют эти сочетания.
-; Заодно можно нажимать цифровые 5/6/7/8.
 ; ------------------------------------------------------------
 
 read_keyboard:
+        xor a
+        ld (horizontal_moving),a
+
         call key_left
         call key_right
         call key_up
@@ -237,19 +290,16 @@ read_keyboard:
         ret
 
 
-; ------------------------------------------------------------
-; LEFT = key 5
-;
-; Keyboard row: 1 2 3 4 5
-; Port high byte = $F7
-; bit 4 = key 5
-; ------------------------------------------------------------
-
+; LEFT = 5
 key_left:
         ld bc,$F7FE
         in a,(c)
         bit 4,a
         ret nz
+
+        ; 1 = смотрим влево.
+        ld a,1
+        ld (player_facing),a
 
         ld a,(player_x)
         or a
@@ -257,38 +307,36 @@ key_left:
 
         dec a
         ld (player_x),a
+
+        ld a,1
+        ld (horizontal_moving),a
         ret
 
 
-; ------------------------------------------------------------
-; RIGHT = key 8
-;
-; Keyboard row: 6 7 8 9 0
-; Port high byte = $EF
-; bit 2 = key 8
-; ------------------------------------------------------------
-
+; RIGHT = 8
 key_right:
         ld bc,$EFFE
         in a,(c)
         bit 2,a
         ret nz
 
+        ; 0 = смотрим вправо.
+        xor a
+        ld (player_facing),a
+
         ld a,(player_x)
-        cp 255
+        cp 248
         ret z
 
         inc a
         ld (player_x),a
+
+        ld a,1
+        ld (horizontal_moving),a
         ret
 
 
-; ------------------------------------------------------------
-; UP = key 7
-;
-; Row 0 9 8 7 6, bit 3 = key 7
-; ------------------------------------------------------------
-
+; UP = 7
 key_up:
         ld bc,$EFFE
         in a,(c)
@@ -304,12 +352,7 @@ key_up:
         ret
 
 
-; ------------------------------------------------------------
-; DOWN = key 6
-;
-; Row 0 9 8 7 6, bit 4 = key 6
-; ------------------------------------------------------------
-
+; DOWN = 6
 key_down:
         ld bc,$EFFE
         in a,(c)
@@ -317,7 +360,7 @@ key_down:
         ret nz
 
         ld a,(player_y)
-        cp 191
+        cp 184
         ret z
 
         inc a
@@ -325,8 +368,217 @@ key_down:
         ret
 
 
+; ------------------------------------------------------------
+; update_animation
+;
+; player_frame:
+;   0 = стоит
+;   1 = шаг A
+;   2 = шаг B
+;
+; При горизонтальном движении кадр ног меняется раз в 6
+; экранных кадров. Положение при этом обновляется каждый кадр.
+; ------------------------------------------------------------
+
+update_animation:
+        ld a,(horizontal_moving)
+        or a
+        jr z,animation_idle
+
+        ; Если только начали идти — сразу показываем первый шаг.
+        ld a,(player_frame)
+        or a
+        jr nz,animation_tick
+
+        ld a,1
+        ld (player_frame),a
+        xor a
+        ld (anim_timer),a
+        ret
+
+animation_tick:
+        ld a,(anim_timer)
+        inc a
+        cp 6
+        jr c,animation_store_timer
+
+        xor a
+        ld (anim_timer),a
+
+        ; 1 <-> 2
+        ld a,(player_frame)
+        cp 1
+        jr z,animation_set_frame_2
+
+        ld a,1
+        ld (player_frame),a
+        ret
+
+animation_set_frame_2:
+        ld a,2
+        ld (player_frame),a
+        ret
+
+animation_store_timer:
+        ld (anim_timer),a
+        ret
+
+animation_idle:
+        xor a
+        ld (player_frame),a
+        ld (anim_timer),a
+        ret
+
+
+; ------------------------------------------------------------
+; select_player_sprite
+;
+; Выход:
+;   IX = адрес нужного 8x8 кадра.
+;
+; player_facing:
+;   0 = вправо
+;   1 = влево
+; ------------------------------------------------------------
+
+select_player_sprite:
+        ld a,(player_facing)
+        or a
+        jr nz,select_left_sprite
+
+select_right_sprite:
+        ld a,(player_frame)
+        or a
+        jr z,select_right_idle
+        cp 1
+        jr z,select_right_walk_1
+
+        ld ix,player_right_walk_2
+        ret
+
+select_right_idle:
+        ld ix,player_right_idle
+        ret
+
+select_right_walk_1:
+        ld ix,player_right_walk_1
+        ret
+
+select_left_sprite:
+        ld a,(player_frame)
+        or a
+        jr z,select_left_idle
+        cp 1
+        jr z,select_left_walk_1
+
+        ld ix,player_left_walk_2
+        ret
+
+select_left_idle:
+        ld ix,player_left_idle
+        ret
+
+select_left_walk_1:
+        ld ix,player_left_walk_1
+        ret
+
+
+; ------------------------------------------------------------
+; Спрайты 8x8
+;
+; Это всё ещё учебная графика, но уже с тремя фазами:
+; idle / walk A / walk B.
+; Левые кадры зеркальны правым.
+; ------------------------------------------------------------
+
+; Вправо — стоит
+player_right_idle:
+        db %00110000
+        db %01111000
+        db %00110000
+        db %01111000
+        db %00110100
+        db %00110000
+        db %00101000
+        db %01000100
+
+; Вправо — шаг A
+player_right_walk_1:
+        db %00110000
+        db %01111000
+        db %00110000
+        db %01111000
+        db %00110110
+        db %00110000
+        db %01010000
+        db %10001000
+
+; Вправо — шаг B
+player_right_walk_2:
+        db %00110000
+        db %01111000
+        db %00110000
+        db %01111000
+        db %00110110
+        db %00110000
+        db %00010100
+        db %00100010
+
+; Влево — стоит
+player_left_idle:
+        db %00001100
+        db %00011110
+        db %00001100
+        db %00011110
+        db %00101100
+        db %00001100
+        db %00010100
+        db %00100010
+
+; Влево — шаг A
+player_left_walk_1:
+        db %00001100
+        db %00011110
+        db %00001100
+        db %00011110
+        db %01101100
+        db %00001100
+        db %00001010
+        db %00010001
+
+; Влево — шаг B
+player_left_walk_2:
+        db %00001100
+        db %00011110
+        db %00001100
+        db %00011110
+        db %01101100
+        db %00001100
+        db %00101000
+        db %01000100
+
+
 player_x:
-        db 128
+        db 124
 
 player_y:
-        db 96
+        db 92
+
+; 0 = вправо, 1 = влево
+player_facing:
+        db 0
+
+; 0 = idle, 1/2 = шаги
+player_frame:
+        db 0
+
+; Считает кадры до следующей смены фазы шага.
+anim_timer:
+        db 0
+
+; Ставится в 1 только если в этом кадре реально изменился X.
+horizontal_moving:
+        db 0
+
+work_y:
+        db 0
