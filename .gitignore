@@ -1,0 +1,12 @@
+# Build artifacts
+*/build/
+
+# ZX Spectrum generated files
+*.bin
+*.tap
+*.trd
+*.sna
+*.z80
+
+# Local release archives
+*_v*_current.zip

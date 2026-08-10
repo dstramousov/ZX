@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$PROJECT_DIR"
+
+command -v sjasmplus >/dev/null 2>&1 || {
+    echo "ERROR: sjasmplus not found in PATH" >&2
+    exit 1
+}
+
+command -v fuse >/dev/null 2>&1 || {
+    echo "ERROR: fuse not found in PATH" >&2
+    exit 1
+}
+
+make
+
+exec fuse --machine 128 --auto-load build/nightbus.tap

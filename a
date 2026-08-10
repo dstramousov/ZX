@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+resolve_project() {
+  local requested="${1:-}"
+  local current
+  current="$(pwd -P)"
+
+  if [[ -n "$requested" ]]; then
+    if [[ -d "$requested" ]]; then
+      PROJECT_DIR="$(cd "$requested" && pwd -P)"
+    elif [[ -d "$ROOT_DIR/$requested" ]]; then
+      PROJECT_DIR="$(cd "$ROOT_DIR/$requested" && pwd -P)"
+    else
+      echo "ERROR: subproject not found: $requested" >&2
+      exit 1
+    fi
+  elif [[ "$current" != "$ROOT_DIR" && -f "$current/versions.md" ]]; then
+    PROJECT_DIR="$current"
+  else
+    mapfile -t candidates < <(find "$ROOT_DIR" -mindepth 2 -maxdepth 2 -type f -name versions.md -printf '%h\n' | sort)
+    case "${#candidates[@]}" in
+      0)
+        echo "ERROR: no subprojects with versions.md found under $ROOT_DIR" >&2
+        exit 1
+        ;;
+      1)
+        PROJECT_DIR="${candidates[0]}"
+        ;;
+      *)
+        echo "ERROR: more than one subproject found. Specify one:" >&2
+        for dir in "${candidates[@]}"; do
+          echo "  ./a $(basename "$dir")" >&2
+        done
+        exit 1
+        ;;
+    esac
+  fi
+
+  if [[ ! -f "$PROJECT_DIR/versions.md" ]]; then
+    echo "ERROR: versions.md not found in $PROJECT_DIR" >&2
+    exit 1
+  fi
+}
+
+resolve_project "${1:-}"
+PROJECT_NAME="$(basename "$PROJECT_DIR")"
+VERSIONS_FILE="$PROJECT_DIR/versions.md"
+
+version="$(
+  grep -E '^## v[0-9]+\.[0-9]+\.[0-9]+ -> v[0-9]+\.[0-9]+\.[0-9]+' "$VERSIONS_FILE" \
+    | tail -n 1 \
+    | sed -E 's/^## v[0-9]+\.[0-9]+\.[0-9]+ -> v([0-9]+\.[0-9]+\.[0-9]+).*$/\1/'
+)"
+
+if [[ -z "$version" ]]; then
+  echo "ERROR: could not detect latest version from $VERSIONS_FILE" >&2
+  exit 1
+fi
+
+archive="$PROJECT_DIR/${PROJECT_NAME}_v${version}_current.zip"
+
+echo "Project: ${PROJECT_NAME}"
+echo "Detected version: v${version}"
+echo "Creating archive: ${archive}"
+
+rm -f "$archive"
+
+(
+  cd "$PROJECT_DIR"
+  zip -r "$archive" . \
+    -x ".git/*" \
+       "__pycache__/*" \
+       "*.pyc" \
+       ".venv/*" \
+       "venv/*" \
+       ".mypy_cache/*" \
+       ".pytest_cache/*" \
+       ".ruff_cache/*" \
+       "dist/*" \
+       "build/*" \
+       "*.egg-info/*" \
+       "*_v*_current.zip"
+)
+
+echo
+echo "Done:"
+echo "$archive"

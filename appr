@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+resolve_project() {
+    local requested="${1:-}"
+    local current
+    current="$(pwd -P)"
+
+    if [[ -n "$requested" ]]; then
+        if [[ -d "$requested" ]]; then
+            PROJECT_DIR="$(cd "$requested" && pwd -P)"
+        elif [[ -d "$ROOT_DIR/$requested" ]]; then
+            PROJECT_DIR="$(cd "$ROOT_DIR/$requested" && pwd -P)"
+        else
+            echo "ERROR: subproject not found: $requested" >&2
+            exit 1
+        fi
+    elif [[ "$current" != "$ROOT_DIR" && -f "$current/versions.md" ]]; then
+        PROJECT_DIR="$current"
+    else
+        mapfile -t candidates < <(find "$ROOT_DIR" -mindepth 2 -maxdepth 2 -type f -name versions.md -printf '%h\n' | sort)
+        case "${#candidates[@]}" in
+            0)
+                echo "ERROR: no subprojects with versions.md found under $ROOT_DIR" >&2
+                exit 1
+                ;;
+            1)
+                PROJECT_DIR="${candidates[0]}"
+                ;;
+            *)
+                echo "ERROR: more than one subproject found. Specify one:" >&2
+                for dir in "${candidates[@]}"; do
+                    echo "  ./appr $(basename "$dir")" >&2
+                done
+                exit 1
+                ;;
+        esac
+    fi
+
+    if [[ ! -f "$PROJECT_DIR/versions.md" ]]; then
+        echo "ERROR: versions.md not found in $PROJECT_DIR" >&2
+        exit 1
+    fi
+}
+
+if ! git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "ERROR: $ROOT_DIR is not inside a git repository"
+    exit 1
+fi
+
+resolve_project "${1:-}"
+PROJECT_NAME="$(basename "$PROJECT_DIR")"
+VERSIONS_FILE="$PROJECT_DIR/versions.md"
+
+if [[ -z "$(git -C "$ROOT_DIR" status --porcelain)" ]]; then
+    echo "No changes to approve."
+    exit 0
+fi
+
+latest_heading="$(grep -E '^## v[0-9]+\.[0-9]+\.[0-9]+ -> v[0-9]+\.[0-9]+\.[0-9]+' "$VERSIONS_FILE" | tail -n 1)"
+
+if [[ -z "$latest_heading" ]]; then
+    echo "ERROR: could not find latest version heading in $VERSIONS_FILE"
+    exit 1
+fi
+
+version_jump="${latest_heading#### }"
+
+section_body="$(
+    awk -v heading="$latest_heading" '
+        $0 == heading { found=1; next }
+        found && /^## / { exit }
+        found { print }
+    ' "$VERSIONS_FILE" | sed '/^[[:space:]]*$/d'
+)"
+
+if [[ -z "$section_body" ]]; then
+    echo "ERROR: latest $VERSIONS_FILE section is empty: $version_jump"
+    exit 1
+fi
+
+commit_message="$version_jump"$'\n\n'"$section_body"
+
+echo
+echo "Project:"
+echo "  $PROJECT_NAME"
+echo
+echo "Version jump:"
+echo "  $version_jump"
+echo
+echo "Changed files in ZX repository:"
+git -C "$ROOT_DIR" status --short
+echo
+echo "Commit message:"
+echo "----------------------------------------"
+echo "$commit_message"
+echo "----------------------------------------"
+echo
+
+read -r -p "Approve, commit and push these changes? [y/N] " answer
+
+case "$answer" in
+    y|Y|yes|YES)
+        ;;
+    *)
+        echo "Cancelled."
+        exit 0
+        ;;
+esac
+
+git -C "$ROOT_DIR" add -A
+git -C "$ROOT_DIR" commit -m "$commit_message"
+git -C "$ROOT_DIR" push
+
+echo
+echo "Done."
