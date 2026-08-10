@@ -3,7 +3,6 @@
         INCLUDE "interrupts.asm"
 
 start:
-        ; Interrupts off while we establish a safe fixed-bank stack.
         di
         ld sp,STACK_TOP
 
@@ -29,42 +28,45 @@ attr_loop:
         jr attr_loop
 
 attr_done:
-        ld a,d
-
-        ; Очищаем bitmap ОДИН раз при старте.
+        ; Очищаем bitmap один раз.
         call clear_screen
 
-        ; Начальная Y-позиция.
-        xor a
-        ld (line_y),a
+        ; Начальная позиция игрового маркера.
+        ld a,128
+        ld (player_x),a
 
-        ; Ставим собственный IM2 и включаем 50 Гц interrupts.
+        ld a,96
+        ld (player_y),a
+
         call init_interrupts
-
-        ; Первый кадр.
-        call draw_line
+        call draw_player
 
 
 ; ------------------------------------------------------------
 ; main_loop
 ;
-; Один проход = один аппаратный кадр Spectrum (~50 Гц).
-; Вместо очистки всех 6144 байт стираем только старую линию.
+; Один цикл = один кадр Spectrum (~50 Гц).
+;
+;   HALT
+;   erase
+;   input
+;   draw
 ; ------------------------------------------------------------
 
 main_loop:
         halt
-        call erase_line
-        call move_line
-        call draw_line
+
+        call erase_player
+        call read_keyboard
+        call draw_player
+
         jr main_loop
 
 
 ; ------------------------------------------------------------
 ; clear_screen
 ;
-; Очищает bitmap $4000-$57FF (6144 байта).
-; Используется только один раз при старте.
+; Очищает bitmap $4000-$57FF.
 ; ------------------------------------------------------------
 
 clear_screen:
@@ -95,25 +97,17 @@ clear_screen_done:
 ;   A  = Y, 0..191
 ;
 ; Выход:
-;   HL = адрес начала физической pixel row.
-;
-; Адрес Spectrum:
-;
-;   H = 010 Y7 Y6 Y2 Y1 Y0
-;   L = Y5 Y4 Y3 00000
-;
-; Поэтому строки 0,1,2... лежат не подряд в памяти.
+;   HL = адрес начала pixel row.
 ; ------------------------------------------------------------
 
 screen_address:
         ld b,a
 
-        ; H: базовый $40 + Y2..Y0 в битах 2..0.
+        ; H = 010 Y7 Y6 Y2 Y1 Y0
         and %00000111
         or $40
         ld h,a
 
-        ; Y7..Y6 -> биты 4..3 H.
         ld a,b
         and %11000000
         rrca
@@ -122,7 +116,7 @@ screen_address:
         or h
         ld h,a
 
-        ; Y5..Y3 -> биты 7..5 L.
+        ; L = Y5 Y4 Y3 00000
         ld a,b
         and %00111000
         rlca
@@ -133,64 +127,206 @@ screen_address:
 
 
 ; ------------------------------------------------------------
-; erase_line
+; pixel_mask
 ;
-; Стирает только текущую горизонтальную линию: 32 байта.
+; Вход:
+;   A = X, 0..255
+;
+; Выход:
+;   C = номер байта в строке (X / 8)
+;   A = маска нужного пикселя
+;
+; ZX хранит левый пиксель в bit 7:
+;
+; X mod 8:
+;   0 -> %10000000
+;   1 -> %01000000
+;   ...
+;   7 -> %00000001
 ; ------------------------------------------------------------
 
-erase_line:
-        ld a,(line_y)
-        call screen_address
+pixel_mask:
+        ld c,a
 
-        xor a
-        ld b,32
+        ; C = X / 8
+        srl c
+        srl c
+        srl c
 
-erase_line_loop:
-        ld (hl),a
-        inc hl
-        djnz erase_line_loop
+        ; B = X & 7
+        and %00000111
+        ld b,a
+
+        ld a,%10000000
+        jr z,pixel_mask_done
+
+pixel_mask_shift:
+        srl a
+        djnz pixel_mask_shift
+
+pixel_mask_done:
         ret
 
 
 ; ------------------------------------------------------------
-; draw_line
+; draw_player
 ;
-; Рисует пунктирную линию на Y=line_y.
+; Рисует один белый пиксель в (player_x, player_y).
 ; ------------------------------------------------------------
 
-draw_line:
-        ld a,(line_y)
+draw_player:
+        ld a,(player_y)
         call screen_address
 
-        ld a,%10101010
-        ld b,32
+        ld a,(player_x)
+        call pixel_mask
 
-draw_line_loop:
+        ; HL += X / 8
+        ld b,0
+        add hl,bc
+
+        or (hl)
         ld (hl),a
-        inc hl
-        djnz draw_line_loop
         ret
 
 
 ; ------------------------------------------------------------
-; move_line
+; erase_player
 ;
-; Движение ровно на 1 пиксель каждый кадр.
-; 50 Гц => примерно 50 пикселей в секунду.
+; Так как фон пока пустой, старый пиксель можно просто стереть.
 ; ------------------------------------------------------------
 
-move_line:
-        ld a,(line_y)
+erase_player:
+        ld a,(player_y)
+        call screen_address
+
+        ld a,(player_x)
+        call pixel_mask
+
+        ld b,0
+        add hl,bc
+
+        cpl
+        and (hl)
+        ld (hl),a
+        ret
+
+
+; ------------------------------------------------------------
+; read_keyboard
+;
+; Читаем стандартные cursor keys Spectrum:
+;
+;   LEFT  = 5
+;   DOWN  = 6
+;   UP    = 7
+;   RIGHT = 8
+;
+; На настоящем Spectrum курсоры — CAPS SHIFT + 5/6/7/8.
+; Нам состояние CAPS SHIFT не важно: достаточно увидеть сами 5..8.
+;
+; В Fuse обычные стрелки обычно эмулируют эти сочетания.
+; Заодно можно нажимать цифровые 5/6/7/8.
+; ------------------------------------------------------------
+
+read_keyboard:
+        call key_left
+        call key_right
+        call key_up
+        call key_down
+        ret
+
+
+; ------------------------------------------------------------
+; LEFT = key 5
+;
+; Keyboard row: 1 2 3 4 5
+; Port high byte = $F7
+; bit 4 = key 5
+; ------------------------------------------------------------
+
+key_left:
+        ld bc,$F7FE
+        in a,(c)
+        bit 4,a
+        ret nz
+
+        ld a,(player_x)
+        or a
+        ret z
+
+        dec a
+        ld (player_x),a
+        ret
+
+
+; ------------------------------------------------------------
+; RIGHT = key 8
+;
+; Keyboard row: 6 7 8 9 0
+; Port high byte = $EF
+; bit 2 = key 8
+; ------------------------------------------------------------
+
+key_right:
+        ld bc,$EFFE
+        in a,(c)
+        bit 2,a
+        ret nz
+
+        ld a,(player_x)
+        cp 255
+        ret z
+
         inc a
-        cp 192
-        jr nz,move_line_store
-
-        xor a
-
-move_line_store:
-        ld (line_y),a
+        ld (player_x),a
         ret
 
 
-line_y:
-        db 0
+; ------------------------------------------------------------
+; UP = key 7
+;
+; Row 0 9 8 7 6, bit 3 = key 7
+; ------------------------------------------------------------
+
+key_up:
+        ld bc,$EFFE
+        in a,(c)
+        bit 3,a
+        ret nz
+
+        ld a,(player_y)
+        or a
+        ret z
+
+        dec a
+        ld (player_y),a
+        ret
+
+
+; ------------------------------------------------------------
+; DOWN = key 6
+;
+; Row 0 9 8 7 6, bit 4 = key 6
+; ------------------------------------------------------------
+
+key_down:
+        ld bc,$EFFE
+        in a,(c)
+        bit 4,a
+        ret nz
+
+        ld a,(player_y)
+        cp 191
+        ret z
+
+        inc a
+        ld (player_y),a
+        ret
+
+
+player_x:
+        db 128
+
+player_y:
+        db 96
