@@ -1,0 +1,8 @@
+{
+  "variant": 3,
+  "name": "bomber",
+  "default": false,
+  "frame_size_bytes": 32,
+  "frame_count": 6,
+  "runtime": "monochrome bitmap"
+}

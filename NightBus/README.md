@@ -301,3 +301,21 @@ player_facing = 1  -> смотрит влево
 
 Движение вверх/вниз пока не имеет собственной анимации: персонаж сохраняет
 последнее горизонтальное направление. Отдельные front/back кадры добавим позже.
+
+## v0.0.17: external 16x16 player assets
+
+Five player variants now live in `assets/sprites/player/`. Variant 4 is active.
+
+`src/player_assets.asm` contains:
+
+```asm
+PLAYER_VARIANT = 4
+```
+
+Only that variant's 192-byte `sprites.bin` is included by `INCBIN`.
+The current dev/TAP image loads it together with code into fixed RAM bank 2.
+The other variants remain project assets and consume no runtime RAM.
+
+Runtime rendering is still monochrome white-on-black so the player can move
+one physical pixel at a time without attribute clash. Later, level tiles and
+colour policy can be moved to paged 128K banks independently.

@@ -123,3 +123,13 @@
 - Для движения влево используются отдельные зеркальные кадры.
 - При отпускании горизонтальной клавиши персонаж возвращается в idle.
 - Вертикальное движение пока использует idle-кадр последнего горизонтального направления.
+
+## v0.0.16 -> v0.0.17
+
+- Moved player graphics out of `main.asm` into external 16x16 assets.
+- Added five switchable player variants; variant 4 (coat + scarf) is default.
+- Each variant has six 32-byte frames and native 16x16 PNG previews.
+- Added `src/player_assets.asm`; only the selected 192-byte variant is included via `INCBIN`.
+- Upgraded renderer from 8x8 to smooth 16x16 sub-byte movement.
+- Movement bounds are now X=0..240 and Y=0..176.
+- Runtime remains monochrome to avoid ZX Spectrum attribute clash during 1-pixel movement.

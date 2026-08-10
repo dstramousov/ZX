@@ -1,6 +1,7 @@
         INCLUDE "memory.asm"
         INCLUDE "paging.asm"
         INCLUDE "interrupts.asm"
+        INCLUDE "player_assets.asm"
 
 start:
         di
@@ -150,75 +151,71 @@ sprite_row_address:
 
 
 ; ------------------------------------------------------------
-; shift_sprite_byte
+; shift_sprite_word
 ;
-; Вход:
-;   A = строка спрайта
-;   B = сдвиг 0..7
-;
-; Выход:
-;   D = левый байт
-;   E = правый байт
-;
-; При X, не кратном 8, один 8-битный ряд спрайта
-; занимает два соседних байта видеопамяти.
+; D:E = 16 source pixels, B = X & 7.
+; Result: D:E:A = up to 3 screen bytes.
 ; ------------------------------------------------------------
 
-shift_sprite_byte:
-        ld d,a
-        ld e,0
+shift_sprite_word:
+        ld c,b
+        xor a
+        ld b,c
+        ld c,a
 
         ld a,b
         or a
+        ld a,c
         ret z
 
-        ld c,b
-
-shift_sprite_loop:
+shift_sprite_word_loop:
         srl d
         rr e
-        dec c
-        jr nz,shift_sprite_loop
+        rra
+        djnz shift_sprite_word_loop
         ret
 
 
 ; ------------------------------------------------------------
-; draw_player
-;
-; Рисует 8 строк спрайта.
-; Каждая строка XOR'ится в экран.
+; draw_player — 16x16
 ; ------------------------------------------------------------
 
 draw_player:
         call select_player_sprite
         ld a,(player_y)
         ld (work_y),a
-        ld c,8
+        ld c,16
 
 draw_player_row:
         ld a,(work_y)
         push bc
         call sprite_row_address
 
-        ld a,(ix+0)
-        call shift_sprite_byte
+        ld d,(ix+0)
+        ld e,(ix+1)
+        call shift_sprite_word
+        ld c,a
 
-        ; Левый кусок.
         ld a,(hl)
         or d
         ld (hl),a
-
-        ; Правый кусок нужен только при сдвиге.
-        ld a,b
-        or a
-        jr z,draw_player_next
 
         inc hl
         ld a,(hl)
         or e
         ld (hl),a
 
+        ld a,b
+        or a
+        jr z,draw_player_next
+
+        inc hl
+        ld a,(hl)
+        or c
+        ld (hl),a
+
 draw_player_next:
+        inc ix
         inc ix
         ld a,(work_y)
         inc a
@@ -230,26 +227,32 @@ draw_player_next:
 
 
 ; ------------------------------------------------------------
-; erase_player
-;
-; Фон пока пустой, поэтому стираем те же биты через AND mask.
+; erase_player — 16x16
 ; ------------------------------------------------------------
 
 erase_player:
         call select_player_sprite
         ld a,(player_y)
         ld (work_y),a
-        ld c,8
+        ld c,16
 
 erase_player_row:
         ld a,(work_y)
         push bc
         call sprite_row_address
 
-        ld a,(ix+0)
-        call shift_sprite_byte
+        ld d,(ix+0)
+        ld e,(ix+1)
+        call shift_sprite_word
+        ld c,a
 
         ld a,d
+        cpl
+        and (hl)
+        ld (hl),a
+
+        inc hl
+        ld a,e
         cpl
         and (hl)
         ld (hl),a
@@ -259,12 +262,13 @@ erase_player_row:
         jr z,erase_player_next
 
         inc hl
-        ld a,e
+        ld a,c
         cpl
         and (hl)
         ld (hl),a
 
 erase_player_next:
+        inc ix
         inc ix
         ld a,(work_y)
         inc a
@@ -325,7 +329,7 @@ key_right:
         ld (player_facing),a
 
         ld a,(player_x)
-        cp 248
+        cp 240
         ret z
 
         inc a
@@ -360,7 +364,7 @@ key_down:
         ret nz
 
         ld a,(player_y)
-        cp 184
+        cp 176
         ret z
 
         inc a
@@ -483,80 +487,7 @@ select_left_walk_1:
         ret
 
 
-; ------------------------------------------------------------
-; Спрайты 8x8
-;
-; Это всё ещё учебная графика, но уже с тремя фазами:
-; idle / walk A / walk B.
-; Левые кадры зеркальны правым.
-; ------------------------------------------------------------
-
-; Вправо — стоит
-player_right_idle:
-        db %00110000
-        db %01111000
-        db %00110000
-        db %01111000
-        db %00110100
-        db %00110000
-        db %00101000
-        db %01000100
-
-; Вправо — шаг A
-player_right_walk_1:
-        db %00110000
-        db %01111000
-        db %00110000
-        db %01111000
-        db %00110110
-        db %00110000
-        db %01010000
-        db %10001000
-
-; Вправо — шаг B
-player_right_walk_2:
-        db %00110000
-        db %01111000
-        db %00110000
-        db %01111000
-        db %00110110
-        db %00110000
-        db %00010100
-        db %00100010
-
-; Влево — стоит
-player_left_idle:
-        db %00001100
-        db %00011110
-        db %00001100
-        db %00011110
-        db %00101100
-        db %00001100
-        db %00010100
-        db %00100010
-
-; Влево — шаг A
-player_left_walk_1:
-        db %00001100
-        db %00011110
-        db %00001100
-        db %00011110
-        db %01101100
-        db %00001100
-        db %00001010
-        db %00010001
-
-; Влево — шаг B
-player_left_walk_2:
-        db %00001100
-        db %00011110
-        db %00001100
-        db %00011110
-        db %01101100
-        db %00001100
-        db %00101000
-        db %01000100
-
+; Sprite data moved to src/player_assets.asm + assets/sprites/player/.
 
 player_x:
         db 124

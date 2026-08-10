@@ -1,0 +1,8 @@
+{
+  "variant": 4,
+  "name": "coat_scarf",
+  "default": true,
+  "frame_size_bytes": 32,
+  "frame_count": 6,
+  "runtime": "monochrome bitmap"
+}
